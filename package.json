@@ -1,6 +1,6 @@
 {
   "name": "@pony-factor/lindsey-sync",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Lindsey Sync GitHub App for syncing requested pull requests with main and leaving focused code-review comments.",
@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node src/server.js",
+    "commit": "node scripts/commit-as-lindsey.js",
     "test": "node --test"
   }
 }
