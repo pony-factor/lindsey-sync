@@ -1,7 +1,9 @@
 import { createHmac, createSign, timingSafeEqual } from 'node:crypto';
 
+import { reviewPullRequest } from './review.js';
+
 const API_VERSION = '2026-03-10';
-const USER_AGENT = 'pony-factor-lindsey-sync/0.1.0';
+const USER_AGENT = 'pony-factor-lindsey-sync/0.2.0';
 const tokenCache = new Map();
 
 export class GitHubHttpError extends Error {
@@ -100,7 +102,7 @@ async function parseResponse(response) {
   }
 }
 
-async function githubRequest(path, token, init = {}) {
+export async function githubRequest(path, token, init = {}) {
   const response = await fetch(`https://api.github.com${path}`, {
     ...init,
     headers: {
@@ -162,6 +164,17 @@ async function getPullWithMergeability(token, owner, repo, number) {
   return pull;
 }
 
+async function waitForUpdatedHead(token, owner, repo, number, oldHeadSha) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await delay(500);
+    const pull = await getPull(token, owner, repo, number);
+    if (pull.head?.sha && pull.head.sha !== oldHeadSha) {
+      return getPullWithMergeability(token, owner, repo, number);
+    }
+  }
+  return null;
+}
+
 async function commentOnConflict(token, owner, repo, number, pull) {
   const marker = conflictMarker(pull);
   const comments = (
@@ -208,6 +221,19 @@ function updateErrorLooksUpToDate(error) {
   return /not behind|already up.?to.?date/i.test(message);
 }
 
+async function runReview(token, owner, repo, number, pull, config, synced) {
+  const result = await reviewPullRequest({
+    request: githubRequest,
+    token,
+    owner,
+    repo,
+    number,
+    pull,
+    config
+  });
+  return synced ? `sync-${result}` : result;
+}
+
 export async function handleReviewRequested(payload, config) {
   if (!matchesReviewRequest(payload, config)) return 'ignored-reviewer';
 
@@ -230,16 +256,30 @@ export async function handleReviewRequested(payload, config) {
   }
 
   const comparison = await compareBaseAndHead(token, owner, repo, pull);
-  if ((comparison?.behind_by ?? 0) === 0) return 'already-current';
+  if ((comparison?.behind_by ?? 0) === 0) {
+    return runReview(token, owner, repo, number, pull, config, false);
+  }
+
+  const oldHeadSha = pull.head.sha;
 
   try {
     await githubRequest(`${repoPath(owner, repo)}/pulls/${number}/update-branch`, token, {
       method: 'PUT',
-      body: JSON.stringify({ expected_head_sha: pull.head.sha })
+      body: JSON.stringify({ expected_head_sha: oldHeadSha })
     });
-    return 'sync-requested';
+
+    const updatedPull = await waitForUpdatedHead(token, owner, repo, number, oldHeadSha);
+    if (!updatedPull) return 'sync-requested';
+    if (isMergeConflict(updatedPull)) {
+      return commentOnConflict(token, owner, repo, number, updatedPull);
+    }
+
+    return runReview(token, owner, repo, number, updatedPull, config, true);
   } catch (error) {
-    if (updateErrorLooksUpToDate(error)) return 'already-current';
+    if (updateErrorLooksUpToDate(error)) {
+      pull = await getPullWithMergeability(token, owner, repo, number);
+      return runReview(token, owner, repo, number, pull, config, false);
+    }
 
     pull = await getPullWithMergeability(token, owner, repo, number);
     if (isMergeConflict(pull) || updateErrorLooksLikeConflict(error)) {
