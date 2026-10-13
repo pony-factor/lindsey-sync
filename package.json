@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node src/server.js",
     "commit": "node scripts/commit-as-lindsey.js",
-    "test": "node --test"
+    "test": "node --test",
+    "resolve": "node scripts/resolve-conflicts.js"
   }
 }

@@ -173,3 +173,86 @@ explicitly rejects those changes rather than corrupting their modes. Branch
 protection and App installation permissions still apply. The service cannot
 access unstaged files or the user's local disk; only the selected staged contents
 are transmitted.
+
+
+## Resolve local Git conflicts with Sweetiebot
+
+The companion Sweetiebot conflict-recovery action looks for this repository in a
+sibling `lindsey-sync` directory, any open VS Code workspace folder, or the
+directory named by `LINDSEY_SYNC_REPO`. Both repositories must be checked out
+locally, and this branch's `scripts/resolve-conflicts.js` must be installed.
+
+The Sweetiebot UI communicates through this local CLI, **not GitHub's remote
+branch-updating API**:
+
+```sh
+node /path/to/lindsey-sync/scripts/resolve-conflicts.js \
+  --repo /path/to/your/feature-repository \
+  --output /tmp/sweetiebot-preview
+```
+
+The CLI reads the unresolved Git index stages (base, ours and theirs) for up
+to eight ordinary UTF-8 text files. It refuses binary files, symlinks,
+submodules, oversized stages, conflicts without both sides, and unsafe paths.
+It posts this schema to Lindsey's resolver service:
+
+```json
+{
+  "version": 1,
+  "branch": "feature",
+  "head": "<Git commit SHA>",
+  "files": [{
+    "path": "src/feature.js",
+    "base": "<original text>",
+    "ours": "<current branch text>",
+    "theirs": "<incoming branch text>"
+  }]
+}
+```
+
+Configure a **separate** shared bearer secret on the hosted service and in
+the local Sweetiebot/VS Code process:
+
+```sh
+export LINDSEY_RESOLVE_SECRET='a-long-random-secret'
+export LINDSEY_RESOLVE_URL='https://YOUR-HOST/resolve-conflicts'
+```
+
+The hosted service needs its usual `OPENAI_API_KEY` to generate code
+proposals. HTTPS is mandatory except for local development. Protect the
+resolver secret as a write-capable service credential, and keep the App's
+private key, model API key, and authentication secret out of source control.
+Only conflicted file contents are sent to the hosted resolver/OpenAI API.
+
+The service checks authentication and returns **proposals only**:
+
+```json
+{
+  "ok": true,
+  "version": 1,
+  "resolutions": [{ "path": "src/feature.js", "contents": "<full merged text>" }]
+}
+```
+
+Lindsey's local CLI writes those proposals as temporary candidate files
+outside the repository and emits a JSON manifest:
+
+```json
+{
+  "version": 1,
+  "branch": "feature",
+  "head": "<Git commit SHA>",
+  "files": [{
+    "path": "src/feature.js",
+    "candidate": "candidate-0.txt",
+    "originalSha": "<SHA-256 of current working-tree file>"
+  }]
+}
+```
+
+Sweetiebot uses the manifest to display `vscode.diff` previews and requires
+explicit approval before replacing working-tree files. It checks that HEAD,
+branch, unresolved index and worktree digests still match. Neither the
+service nor CLI stages, commits, merges, pushes, force-pushes or overwrites
+the repository. **The user must review, stage, commit, and publish the
+approved resolution manually.** Cancelling leaves working files untouched.

@@ -1,4 +1,3 @@
-
 #!/usr/bin/env node
 // Execute from the target repository's working directory. No GitHub App private key is stored here.
 import { execFileSync } from 'node:child_process';

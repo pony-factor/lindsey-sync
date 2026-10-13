@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { authorizeCommit, commitAsLindsey, CommitValidationError } from './commit.js';
+import { resolveConflicts, ResolutionValidationError } from './resolve.js';
 
 import {
   handleReviewRequested,
@@ -30,6 +31,7 @@ function configFromEnv() {
   }
   return {
     commitSecret,
+    resolveSecret: process.env.LINDSEY_RESOLVE_SECRET?.trim() || '',
     commitInstallationId,
     commitRepositories,
     appId: requiredEnv('GITHUB_APP_ID'),
@@ -97,6 +99,26 @@ const server = createServer(async (req, res) => {
       console.error('Lindsey commit failed:', error);
       sendJson(res, error instanceof CommitValidationError ? 400 : 409,
         { ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+    return;
+  }
+
+
+  if (req.method === 'POST' && url.pathname === '/resolve-conflicts') {
+    if (!authorizeCommit(req.headers.authorization, config.resolveSecret)) {
+      res.writeHead(401).end('Unauthorized');
+      return;
+    }
+    try {
+      const rawBody = await readBody(req, 1024 * 1024);
+      const payload = JSON.parse(rawBody.toString('utf8'));
+      const resolution = await resolveConflicts(payload, config);
+      sendJson(res, 200, { ok: true, ...resolution });
+    } catch (error) {
+      console.error('Lindsey conflict resolution failed:', error);
+      sendJson(res, error instanceof ResolutionValidationError ? 400 : 502, {
+        ok: false, error: error instanceof Error ? error.message : String(error)
+      });
     }
     return;
   }
