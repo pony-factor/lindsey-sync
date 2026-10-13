@@ -120,7 +120,7 @@ export async function githubRequest(path, token, init = {}) {
   return { status: response.status, data };
 }
 
-async function getInstallationToken(installationId, config) {
+export async function getInstallationToken(installationId, config) {
   const cached = tokenCache.get(installationId);
   const now = Date.now();
   if (cached && cached.expiresAt - 60_000 > now) return cached.token;

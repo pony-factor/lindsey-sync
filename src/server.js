@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { authorizeCommit, commitAsLindsey, CommitValidationError } from './commit.js';
 
 import {
   handleReviewRequested,
@@ -19,7 +20,18 @@ function configFromEnv() {
     throw new Error('Set CODEX_REVIEWER_LOGIN or CODEX_REVIEWER_TEAM');
   }
 
+  const commitSecret = process.env.LINDSEY_COMMIT_SECRET?.trim() || '';
+  const commitInstallationId = process.env.LINDSEY_COMMIT_INSTALLATION_ID?.trim() || '';
+  const commitRepositories = (process.env.LINDSEY_COMMIT_REPOSITORIES || '')
+    .split(',').map((repo) => repo.trim()).filter(Boolean);
+  if ([Boolean(commitSecret), Boolean(commitInstallationId), commitRepositories.length > 0].some(Boolean) &&
+      !(commitSecret && commitInstallationId && commitRepositories.length)) {
+    throw new Error('Set all three LINDSEY_COMMIT_* server settings together');
+  }
   return {
+    commitSecret,
+    commitInstallationId,
+    commitRepositories,
     appId: requiredEnv('GITHUB_APP_ID'),
     privateKey: requiredEnv('GITHUB_PRIVATE_KEY'),
     webhookSecret: requiredEnv('GITHUB_WEBHOOK_SECRET'),
@@ -68,6 +80,24 @@ const server = createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/health') {
     sendJson(res, 200, { ok: true, server: 'lindsey-sync' });
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/commit') {
+    if (!authorizeCommit(req.headers.authorization, config.commitSecret)) {
+      res.writeHead(401).end('Unauthorized');
+      return;
+    }
+    try {
+      const rawBody = await readBody(req, 9 * 1024 * 1024);
+      const payload = JSON.parse(rawBody.toString('utf8'));
+      const result = await commitAsLindsey(payload, config);
+      sendJson(res, 201, { ok: true, ...result });
+    } catch (error) {
+      console.error('Lindsey commit failed:', error);
+      sendJson(res, error instanceof CommitValidationError ? 400 : 409,
+        { ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
     return;
   }
 
