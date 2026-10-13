@@ -24,7 +24,9 @@ function configFromEnv() {
     privateKey: requiredEnv('GITHUB_PRIVATE_KEY'),
     webhookSecret: requiredEnv('GITHUB_WEBHOOK_SECRET'),
     reviewerLogin,
-    reviewerTeam
+    reviewerTeam,
+    openaiApiKey: process.env.OPENAI_API_KEY?.trim() || '',
+    openaiModel: process.env.OPENAI_MODEL?.trim() || ''
   };
 }
 
