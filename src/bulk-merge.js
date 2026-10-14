@@ -189,6 +189,7 @@ async function runOne(api, prefix, selection, repo) {
   }
   const verified = actual.split('\n')[0] === title &&
     trailersOrdered && changedTree && mergedPr?.merged === true &&
+    mergedPr?.base?.ref === selection.base &&
     mergedPr?.merge_commit_sha === hash;
   return result(selection, verified ? 'merged' : 'verification-failed',
     verified ? undefined : 'GitHub merged the PR but commit attribution or resulting tree failed verification',
@@ -208,6 +209,27 @@ export async function mergeSelectedPullRequests(payload, api = githubApi) {
       live.set(item.number, { error: String(error.message || error) });
     }
   }
+  // A child can point at an unselected open parent. Discover those parents
+  // instead of assuming a non-main target is unrelated merely from the picker.
+  const openHeads = new Set();
+  let ancestryError = '';
+  if (request.pullRequests.some(item => item.base !== 'main')) {
+    try {
+      for (let page = 1; page <= 20; page++) {
+        const group = await api(prefix + '/pulls?state=open&per_page=100&page=' + page);
+        if (!Array.isArray(group)) throw new BulkMergeError('Invalid open-PR list');
+        for (const pr of group) {
+          if (pr?.head?.repo?.full_name?.toLowerCase() === request.repository.toLowerCase()) {
+            openHeads.add(pr.head.ref);
+          }
+        }
+        if (group.length < 100) break;
+        if (page === 20) throw new BulkMergeError('Open-PR ancestry exceeds pagination limit');
+      }
+    } catch (error) {
+      ancestryError = String(error.message || error);
+    }
+  }
   const ordered = [...request.pullRequests].sort((a, b) => a.number - b.number);
   for (const item of ordered) {
     const snapshot = live.get(item.number);
@@ -215,6 +237,10 @@ export async function mergeSelectedPullRequests(payload, api = githubApi) {
       results.push(result(item, 'blocked', snapshot.error));
     } else if (!matchesSnapshot(snapshot, item, request.repository)) {
       results.push(result(item, 'blocked', 'Selected PR no longer matches its GitHub snapshot'));
+    } else if (item.base !== 'main' && ancestryError) {
+      results.push(result(item, 'blocked', 'Could not verify open parent PRs: ' + ancestryError));
+    } else if (item.base !== 'main' && openHeads.has(item.base)) {
+      results.push(result(item, 'blocked', 'Base branch is the head of an open PR; select and verify the complete ancestry'));
     } else if (isLinkedStack(request, item) || snapshot.stack) {
       results.push(result(item, 'blocked', 'Stack members cannot use ordinary PR merges without losing layer boundaries'));
     } else {
