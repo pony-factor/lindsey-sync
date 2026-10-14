@@ -109,3 +109,21 @@ test('stale head, conflict, and incomplete selected stacks cause no writes', asy
   assert.deepEqual(result.results.map(r => r.status), ['blocked', 'blocked', 'blocked']);
   assert.equal(writes, 0);
 });
+
+
+test('does not merge an unselected open ancestor into an intermediate target', async () => {
+  const item = selected(30, { base: 'parent-topic', head: 'child-topic' });
+  let writes = 0;
+  const api = async (path, method = 'GET') => {
+    if (method !== 'GET') { writes++; throw new Error('Unexpected merge'); }
+    if (path.includes('/pulls?state=open')) {
+      return [{ head: { ref: 'parent-topic', repo: { full_name: repo } } }];
+    }
+    if (path.endsWith('/pulls/30')) return live(item);
+    throw new Error('Unexpected request ' + path);
+  };
+  const result = await mergeSelectedPullRequests(request(item), api);
+  assert.equal(result.results[0].status, 'blocked');
+  assert.match(result.results[0].reason, /head of an open PR/);
+  assert.equal(writes, 0);
+});
