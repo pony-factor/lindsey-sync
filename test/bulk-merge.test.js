@@ -97,7 +97,7 @@ test('stale head, conflict, and incomplete selected stacks cause no writes', asy
   const stackParent = selected(20, { head: 'base-layer' });
   const stackChild = selected(21, { base: 'base-layer', head: 'second-layer' });
   let writes = 0;
-  const api = async (path, method) => {
+  const api = async (path, method = 'GET') => {
     if (method !== 'GET') { writes++; throw new Error('Unexpected mutation'); }
     const n = Number(/\/pulls\/(\d+)/.exec(path)?.[1]);
     if (n === 10) return live({ ...original, headSha: 'c'.repeat(40) });
