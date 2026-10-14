@@ -256,3 +256,17 @@ branch, unresolved index and worktree digests still match. Neither the
 service nor CLI stages, commits, merges, pushes, force-pushes or overwrites
 the repository. **The user must review, stage, commit, and publish the
 approved resolution manually.** Cancelling leaves working files untouched.
+
+## Bulk squash merging from Sweetiebot
+
+Lindsey owns the headless bulk-merge engine. Sweetiebot remains the selection UI and invokes a local external Lindsey CLI when both repositories are installed. It does not open ChatGPT for the merge.
+
+Install and authenticate the GitHub `gh` CLI. Place `lindsey-sync` beside the project repository, open it as another VS Code workspace folder, or set `LINDSEY_SYNC_REPO`. Sweetiebot passes its GitHub session as an ephemeral `GH_TOKEN` child-process environment variable, never in the selection file.
+
+External entry point: `node /path/to/lindsey-sync/scripts/bulk-merge.js --input /tmp/selection.json`.
+
+The JSON input specifies `repository` and 1–50 `pullRequests` with each selected PR's `number`, `title`, `head`, `headSha`, and `base` (optionally `headRepo` and `stack`). The CLI emits a single JSON object with `version: 1`, `repository`, and results per selected PR: `merged`, `queued`, `blocked`, or `verification-failed`. Completed merge results include the commit URL. Do not treat queued or unverified statuses as completed merges.
+
+Lindsey checks exact PR snapshots and mergeability, paginates original PR commits for verified contributor attribution, and calls the GitHub squash API with an expected head SHA, a numbered `(#PR)` subject, and ordered original-contributor and Codex Web coauthor trailers. It verifies the resulting commit title, attribution and nonempty tree change.
+
+**Safety limitation:** Linked and GitHub-native stacks are blocked until an atomic per-layer operation can preserve independent numbered squash commits and attribution. Lindsey never merges a child into an intermediate base and calls it delivered to main, silently includes unselected PRs, or force-pushes any branch. Unrelated eligible PRs continue. Sweetiebot retains its previous ChatGPT workflow when no Lindsey CLI is installed.
