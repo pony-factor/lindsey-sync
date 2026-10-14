@@ -91,7 +91,7 @@ export function attributionForCommits(commits) {
 
 export function isLinkedStack(selected, item) {
   if (item.stack) return true;
-  return selected.some(other => other.number !== item.number && (
+  return selected.pullRequests.some(other => other.number !== item.number && (
     (item.base === other.head && (!other.headRepo || other.headRepo === selected.repository)) ||
     (other.base === item.head && (!item.headRepo || item.headRepo === selected.repository))
   ));
@@ -215,7 +215,7 @@ export async function mergeSelectedPullRequests(payload, api = githubApi) {
       results.push(result(item, 'blocked', snapshot.error));
     } else if (!matchesSnapshot(snapshot, item, request.repository)) {
       results.push(result(item, 'blocked', 'Selected PR no longer matches its GitHub snapshot'));
-    } else if (isLinkedStack({ ...request, pullRequests: request.pullRequests }, item) || snapshot.stack) {
+    } else if (isLinkedStack(request, item) || snapshot.stack) {
       results.push(result(item, 'blocked', 'Stack members cannot use ordinary PR merges without losing layer boundaries'));
     } else {
       try {
