@@ -259,7 +259,7 @@ approved resolution manually.** Cancelling leaves working files untouched.
 
 ## Bulk squash merging from Sweetiebot
 
-Lindsey owns the headless bulk-merge engine. Sweetiebot remains the selection UI and invokes a local external Lindsey CLI when both repositories are installed. It does not open ChatGPT for the merge.
+Lindsey provides an optional headless bulk-merge CLI for direct use. Sweetiebot’s bulk merge buttons use the ChatGPT web interface to resolve straightforward conflicts or leave focused PR feedback when human judgment is needed, even when this CLI is installed.
 
 Install and authenticate the GitHub `gh` CLI. Place `lindsey-sync` beside the project repository, open it as another VS Code workspace folder, or set `LINDSEY_SYNC_REPO`. Sweetiebot passes its GitHub session as an ephemeral `GH_TOKEN` child-process environment variable, never in the selection file.
 
@@ -269,4 +269,4 @@ The JSON input specifies `repository` and 1–50 `pullRequests` with each select
 
 Lindsey checks exact PR snapshots and mergeability, paginates original PR commits for verified contributor attribution, and calls the GitHub squash API with an expected head SHA, a numbered `(#PR)` subject, and ordered original-contributor and Codex Web coauthor trailers. It verifies the resulting commit title, attribution and nonempty tree change.
 
-**Safety limitation:** Linked and GitHub-native stacks are blocked until an atomic per-layer operation can preserve independent numbered squash commits and attribution. Lindsey never merges a child into an intermediate base and calls it delivered to main, silently includes unselected PRs, or force-pushes any branch. Unrelated eligible PRs continue. Sweetiebot retains its previous ChatGPT workflow when no Lindsey CLI is installed.
+**Safety limitation:** Linked and GitHub-native stacks are blocked until an atomic per-layer operation can preserve independent numbered squash commits and attribution. Lindsey never merges a child into an intermediate base and calls it delivered to main, silently includes unselected PRs, or force-pushes any branch. Unrelated eligible PRs continue. These limitations apply to the standalone CLI; Sweetiebot’s ChatGPT workflow handles conflict resolution and human feedback.

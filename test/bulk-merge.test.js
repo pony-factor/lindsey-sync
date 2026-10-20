@@ -127,3 +127,64 @@ test('does not merge an unselected open ancestor into an intermediate target', a
   assert.match(result.results[0].reason, /head of an open PR/);
   assert.equal(writes, 0);
 });
+
+test('reports confirmed conflicts without retrying or writing', async () => {
+  const item = selected();
+  let reads = 0;
+  const report = await mergeSelectedPullRequests(request(item), async (path, method = 'GET') => {
+    assert.equal(method, 'GET');
+    assert(path.endsWith('/pulls/10'));
+    reads++;
+    return { ...live(item), mergeable: false, mergeable_state: 'dirty' };
+  });
+  assert.equal(reads, 2);
+  assert.equal(report.results[0].status, 'blocked');
+  assert.match(report.results[0].reason, /merge conflicts with main/);
+});
+
+test('waits for pending mergeability before collecting commits', async () => {
+  const item = selected();
+  let reads = 0;
+  let collected = false;
+  const report = await mergeSelectedPullRequests(request(item), async (path, method = 'GET') => {
+    assert.equal(method, 'GET');
+    if (path.endsWith('/pulls/10')) {
+      reads++;
+      return { ...live(item), mergeable: reads < 3 ? null : true };
+    }
+    assert(path.includes('/commits?'));
+    collected = true;
+    return []; // Stop before a write: no original commits to attribute.
+  });
+  assert.equal(reads, 3);
+  assert(collected);
+  assert.match(report.results[0].reason, /No original PR commits/);
+});
+
+test('pending mergeability has a bounded retry and an actionable reason', async () => {
+  const item = selected();
+  let reads = 0;
+  const report = await mergeSelectedPullRequests(request(item), async (path, method = 'GET') => {
+    assert.equal(method, 'GET');
+    assert(path.endsWith('/pulls/10'));
+    reads++;
+    return { ...live(item), mergeable: null };
+  });
+  assert.equal(reads, 6);
+  assert.equal(report.results[0].status, 'blocked');
+  assert.match(report.results[0].reason, /still calculating mergeability/);
+});
+
+test('stops pending retries if the selected head changes', async () => {
+  const item = selected();
+  let reads = 0;
+  const report = await mergeSelectedPullRequests(request(item), async (path, method = 'GET') => {
+    assert.equal(method, 'GET');
+    assert(path.endsWith('/pulls/10'));
+    reads++;
+    return { ...live(reads < 3 ? item : { ...item, headSha: 'c'.repeat(40) }), mergeable: null };
+  });
+  assert.equal(reads, 3);
+  assert.equal(report.results[0].status, 'blocked');
+  assert.match(report.results[0].reason, /changed; refresh/);
+});
