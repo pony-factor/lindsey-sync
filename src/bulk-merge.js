@@ -132,14 +132,33 @@ function result(item, status, reason, more = {}) {
   return { number: item.number, base: item.base, status, ...(reason ? { reason } : {}), ...more };
 }
 
-async function runOne(api, prefix, selection, repo) {
+function mergeabilityReason(pr) {
+  if (pr.mergeable === false || pr.mergeable_state === 'dirty') {
+    return 'This PR has merge conflicts with ' + pr.base.ref + '; resolve the conflicts and refresh the picker';
+  }
+  if (pr.mergeable !== true) {
+    return 'GitHub is still calculating mergeability; retry bulk merge shortly';
+  }
+}
+
+async function getPullWithMergeability(api, prefix, selection, repo) {
   let pr = await api(prefix + '/pulls/' + selection.number);
+  for (let attempt = 0; attempt < 4 && pr.mergeable === null &&
+      matchesSnapshot(pr, selection, repo); attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 350));
+    pr = await api(prefix + '/pulls/' + selection.number);
+  }
+  return pr;
+}
+
+async function runOne(api, prefix, selection, repo) {
+  let pr = await getPullWithMergeability(api, prefix, selection, repo);
   if (!matchesSnapshot(pr, selection, repo)) {
     return result(selection, 'blocked', 'The PR head, base, title, or state changed; refresh the picker');
   }
   if (pr.stack) return result(selection, 'blocked', 'Native stacks require per-layer attribution-safe merging');
-  if (pr.mergeable !== true) {
-    return result(selection, 'blocked', 'GitHub has not confirmed this PR is mergeable');
+  if (mergeabilityReason(pr)) {
+    return result(selection, 'blocked', mergeabilityReason(pr));
   }
   if (!(Number(pr.changed_files) > 0)) {
     return result(selection, 'blocked', 'No changed PR files to squash');
@@ -156,11 +175,12 @@ async function runOne(api, prefix, selection, repo) {
 
   // Final preflight immediately before a write. The API's sha parameter
   // provides a second compare-and-swap guard on the exact selected HEAD.
-  pr = await api(prefix + '/pulls/' + selection.number);
-  if (!matchesSnapshot(pr, selection, repo) || pr.mergeable !== true ||
-      !(Number(pr.changed_files) > 0)) {
+  pr = await getPullWithMergeability(api, prefix, selection, repo);
+  if (!matchesSnapshot(pr, selection, repo)) {
     return result(selection, 'blocked', 'PR changed or stopped being mergeable during preflight');
   }
+  if (mergeabilityReason(pr)) return result(selection, 'blocked', mergeabilityReason(pr));
+  if (!(Number(pr.changed_files) > 0)) return result(selection, 'blocked', 'No changed PR files to squash');
   const response = await api(prefix + '/pulls/' + selection.number + '/merge', 'PUT', {
     merge_method: 'squash', sha: selection.headSha,
     commit_title: title, commit_message: message
