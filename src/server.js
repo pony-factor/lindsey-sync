@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { authorizeCommit, commitAsLindsey, CommitValidationError } from './commit.js';
 import { resolveConflicts, ResolutionValidationError } from './resolve.js';
+import { createResolverAuthorizer } from './resolve-auth.js';
 
 import {
   handleReviewRequested,
@@ -32,6 +33,7 @@ function configFromEnv() {
   return {
     commitSecret,
     resolveSecret: process.env.LINDSEY_RESOLVE_SECRET?.trim() || '',
+    resolvePublicKey: process.env.LINDSEY_RESOLVE_PUBLIC_KEY?.trim() || '',
     commitInstallationId,
     commitRepositories,
     appId: requiredEnv('GITHUB_APP_ID'),
@@ -70,6 +72,7 @@ function sendJson(res, status, value) {
 }
 
 const config = configFromEnv();
+const authorizeResolver = createResolverAuthorizer(config);
 const host = process.env.HOST?.trim() || '0.0.0.0';
 const port = Number(process.env.PORT || 8788);
 
@@ -104,13 +107,27 @@ const server = createServer(async (req, res) => {
   }
 
 
-  if (req.method === 'POST' && url.pathname === '/resolve-conflicts') {
-    if (!authorizeCommit(req.headers.authorization, config.resolveSecret)) {
+  if (['GET', 'POST'].includes(req.method) && url.pathname === '/resolve-conflicts') {
+    const signed = req.headers['x-lindsey-proof'] !== undefined;
+    const legacy = req.method === 'POST' && !signed && authorizeCommit(req.headers.authorization, config.resolveSecret);
+    if (!signed && !legacy) {
       res.writeHead(401).end('Unauthorized');
       return;
     }
     try {
-      const rawBody = await readBody(req, 1024 * 1024);
+      const rawBody = req.method === 'POST' ? await readBody(req, 1024 * 1024) : Buffer.alloc(0);
+      if (signed && !await authorizeResolver(req.method, req.headers, rawBody)) {
+        res.writeHead(401).end('Unauthorized');
+        return;
+      }
+      if (req.method === 'GET') {
+        if (!config.openaiApiKey) {
+          sendJson(res, 503, { ok: false, error: 'The Lindsey resolver model is not configured.' });
+          return;
+        }
+        sendJson(res, 200, { ok: true, authentication: 'lindsey-app-v1' });
+        return;
+      }
       const payload = JSON.parse(rawBody.toString('utf8'));
       const resolution = await resolveConflicts(payload, config);
       sendJson(res, 200, { ok: true, ...resolution });

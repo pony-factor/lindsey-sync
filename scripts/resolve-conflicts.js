@@ -90,19 +90,31 @@ export async function main(args = process.argv.slice(2), env = process.env, fetc
   const secret = env.LINDSEY_RESOLVE_SECRET?.trim();
   if (!secret) throw new Error('Set LINDSEY_RESOLVE_SECRET in Sweetiebot’s local environment');
   const endpoint = validateEndpoint(env.LINDSEY_RESOLVE_URL || '');
+  const manifest = await prepareConflictPreview(repo, output, async request => {
+    const response = await fetchImpl(endpoint, {
+      method: 'POST', redirect: 'error',
+      headers: { Authorization: 'Bearer ' + secret, 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(120000)
+    });
+    const reply = await response.json();
+    if (!response.ok || !reply.ok) {
+      throw new Error(reply.error || 'Lindsey resolve endpoint HTTP ' + response.status);
+    }
+    return reply;
+  });
+  process.stdout.write(JSON.stringify(manifest) + '\n');
+  return manifest;
+}
+
+export async function prepareConflictPreview(repo, output, requestResolution) {
+  if (!path.isAbsolute(repo) || !path.isAbsolute(output) || repo === output || output.startsWith(repo + path.sep)) {
+    throw new Error('Provide a repository and a separate output directory outside its worktree');
+  }
   const { request, originals } = await collectConflictRequest(repo);
   await mkdir(output, { recursive: true });
   if (!(await lstat(output)).isDirectory()) throw new Error('Output is not a directory');
-  const response = await fetchImpl(endpoint, {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + secret, 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-    signal: AbortSignal.timeout(120000)
-  });
-  const reply = await response.json();
-  if (!response.ok || !reply.ok) {
-    throw new Error(reply.error || 'Lindsey resolve endpoint HTTP ' + response.status);
-  }
+  const reply = await requestResolution(request);
   const validated = validateResolutionOutput(reply, request.files);
   const files = [];
   for (const [i, result] of validated.resolutions.entries()) {
@@ -110,9 +122,7 @@ export async function main(args = process.argv.slice(2), env = process.env, fetc
     await writeFile(path.join(output, filename), result.contents, { flag: 'wx', mode: 0o600 });
     files.push({ path: result.path, candidate: filename, originalSha: originals.get(result.path) });
   }
-  const manifest = { version: 1, branch: request.branch, head: request.head, files };
-  process.stdout.write(JSON.stringify(manifest) + '\n');
-  return manifest;
+  return { version: 1, branch: request.branch, head: request.head, files };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
