@@ -177,6 +177,17 @@ are transmitted.
 
 ## Resolve local Git conflicts with Sweetiebot
 
+For **Resolve and sync with Lindsey**, Sweetiebot discovers this server from
+the Lindsey App's HTTPS `/webhook` URL. It signs a short-lived request for the
+publishing repository using the key saved in Magic Settings. The server
+verifies the proof and checks the repository's App installation in GitHub.
+The server trusts the public key derived from `GITHUB_PRIVATE_KEY` by default.
+If Magic Settings uses a different key for the same App, set
+`LINDSEY_RESOLVE_PUBLIC_KEY` on the server to that key's public PEM.
+
+The standalone preview CLI and older Sweetiebot releases use the shared-secret
+flow below. Leave `LINDSEY_RESOLVE_SECRET` unset to disable that legacy flow.
+
 The companion Sweetiebot conflict-recovery action looks for this repository in a
 sibling `lindsey-sync` directory, any open VS Code workspace folder, or the
 directory named by `LINDSEY_SYNC_REPO`. Both repositories must be checked out
